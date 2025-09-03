@@ -1,0 +1,13 @@
+name = "logic_env"
+version = "0.1.0"
+defaultTargets = ["logic_env"]
+
+[[lean_lib]]
+name = "LogicEnv"
+
+[[lean_exe]]
+name = "logic_env"
+root = "Main"
+
+[dependencies]
+std = { git = "https://github.com/leanprover/std4", tag = "nightly" }
