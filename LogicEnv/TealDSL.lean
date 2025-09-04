@@ -252,35 +252,9 @@ theorem pinGuard_ok :
 
 #eval compileProg pinGuard
 
--- theorem pinGuard_bad :
---   ¬ ∃ (n : Nat) (t : MachineState),
---       eval pinGuard (withPin n) = .ok t ∧
---       n ≠ 1234 ∧
---       t.stack.head? = some (Ty.uint64, Value.U 1) := by
---   intro h
---   rcases h with ⟨n, t, heval, hne, hhead⟩
---   have hne' : 1234 ≠ n := by simpa [eq_comm] using hne
---   have heq :
---       eval pinGuard (withPin n)
---       =
---       .ok { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
---            , scratch := HashMap.emptyWithCapacity } := by
---     simp [eval, pinGuard, pinCond, thenBranch, elseBranch, withPin, hne']
---   have ht :
---       t =
---       { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
---       , scratch := HashMap.emptyWithCapacity } := by
---     have hjoin :
---       Except.ok t =
---       Except.ok {
---         stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
---         , scratch := HashMap.emptyWithCapacity } := by
---       exact Eq.trans heval.symm heq
---     simpa using (Except.ok.inj hjoin)
---   have hcomputed :
---       t.stack.head? = some (Ty.uint64, Value.U 0) := by
---     -- rewrite using ht, then simplify head? on a cons list
---     simp [ht]
---   have : some (Ty.uint64, Value.U 1) = some (Ty.uint64, Value.U 0) := by
---     exact Eq.trans hhead.symm hcomputed
---   cases this
+theorem pinGuard_bad :
+  ¬ ∃ (n : Nat) (t : MachineState),
+    eval pinGuard (withPin n) = .ok t ∧
+    n ≠ 1234 ∧
+    t.stack.head? = some (Ty.uint64, Value.U 1) := by
+  sorry
