@@ -107,10 +107,10 @@ def eval : TealProg s0 s1 → MachineState → Except String MachineState
     match eval cond st with
     | .ok st' =>
       match st'.stack with
-      | (Ty.uint64, Value.U 1) :: _ =>
-        eval thenB st'
-      | (Ty.uint64, Value.U 0) :: _ =>
-        eval elseB st'
+      | (Ty.uint64, Value.U 1) :: rest =>
+        eval thenB { st' with stack := rest }
+      | (Ty.uint64, Value.U 0) :: rest =>
+        eval elseB { st' with stack := rest }
       | _ =>
         .error "ifElse: condition did not leave a uint64 0 or 1 on stack"
     | e => e
@@ -241,22 +241,42 @@ def withPin (n : Nat) : MachineState :=
   { stack := [(Ty.uint64, Value.U n)], scratch := HashMap.emptyWithCapacity }
 
 
--- If the pin is 1234, decision is 1 and the pin is preserved underneath
 theorem pinGuard_ok :
   eval pinGuard (withPin 1234)
   =
   .ok { stack := (Ty.uint64, Value.U 1) :: (Ty.uint64, Value.U 1234) :: []
       , scratch := HashMap.emptyWithCapacity } := by
-  simp [eval, pinGuard, pinCond, thenBranch, elseBranch, withPin]
   rfl
 
--- If the pin is not 1234 (example: 9999), decision is 0 and the pin is preserved
 theorem pinGuard_bad :
-  eval pinGuard (withPin 9999)
-  =
-  .ok { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U 9999) :: []
+  ¬ ∃ (n : Nat) (t : MachineState),
+      eval pinGuard (withPin n) = .ok t ∧
+      n ≠ 1234 ∧
+      t.stack.head? = some (Ty.uint64, Value.U 1) := by
+  intro h
+  rcases h with ⟨n, t, heval, hne, hhead⟩
+  have hne' : 1234 ≠ n := by simpa [eq_comm] using hne
+  have heq :
+      eval pinGuard (withPin n)
+      =
+      .ok { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
+           , scratch := HashMap.emptyWithCapacity } := by
+    simp [eval, pinGuard, pinCond, thenBranch, elseBranch, withPin]
+  have ht :
+      t =
+      { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
       , scratch := HashMap.emptyWithCapacity } := by
-  -- Same comment as above—use unfolding/simp on your `eval`.
-  rfl
-
--- #eval compileProg pinGuard
+    have hjoin :
+      Except.ok t =
+      Except.ok {
+        stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
+        , scratch := HashMap.emptyWithCapacity } := by
+      exact Eq.trans heval.symm heq
+    simpa using (Except.ok.inj hjoin)
+  have hcomputed :
+      t.stack.head? = some (Ty.uint64, Value.U 0) := by
+    -- rewrite using ht, then simplify head? on a cons list
+    simp [ht]
+  have : some (Ty.uint64, Value.U 1) = some (Ty.uint64, Value.U 0) := by
+    exact Eq.trans hhead.symm hcomputed
+  cases this
