@@ -49,6 +49,8 @@ deriving Inhabited
 
 -- type representing the compiled instructions from TealProg
 inductive Instr where
+  | pragma (version : Nat)
+  | arg (i : Nat)
   | int (n : Nat)
   | byte (bs : ByteArray)
   | add
@@ -62,15 +64,17 @@ inductive Instr where
 
 instance : Repr Instr where
   reprPrec
+    | Instr.pragma v, _  => Std.Format.text s!"#pragma version {v}"
+    | Instr.arg i, _     => Std.Format.text s!"arg_{i}"
     | Instr.int n, _     => Std.Format.text s!"int {n}"
     | Instr.byte bs, _   => Std.Format.text s!"byte 0x{byteArrayToHex bs}"
     | Instr.add, _       => Std.Format.text "add"
-    | Instr.eq, _        => Std.Format.text "eq"
+    | Instr.eq, _        => Std.Format.text "=="
     | Instr.dup, _       => Std.Format.text "dup"
     | Instr.swap, _      => Std.Format.text "swap"
     | Instr.bz l, _      => Std.Format.text s!"bz {l}"
     | Instr.b l, _       => Std.Format.text s!"b {l}"
-    | Instr.label l, _   => Std.Format.text s!"label {l}"
+    | Instr.label l, _   => Std.Format.text s!"{l}:"
 
 abbrev Program := List Instr
 
@@ -164,6 +168,8 @@ partial def runsTo : Program → MachineState → Except String MachineState
   | [], state => .ok state
   | instr :: rest, state =>
     match instr with
+    | Instr.pragma _ => runsTo rest state
+    | Instr.arg _    => runsTo rest state
     | Instr.int n =>
         runsTo rest { state with stack := (Ty.uint64, Value.U n) :: state.stack }
     | Instr.byte bs =>
@@ -204,12 +210,29 @@ def testProg {out : List Ty} (prog : TealProg [] out) : List (Ty × Value) :=
   | .error _  => []
 
 def compileProg {inStack outStack : List Ty} (prog : TealProg inStack outStack) : Program :=
-  (compile prog).run 0 |>.1
+  let body := (compile prog).run 0 |>.1
+  -- Add TEAL version and load arg_0 before the program body.
+  [Instr.pragma 2, Instr.arg 0] ++ body
 
 instance : Repr (List Instr) where
   reprPrec xs _ :=
     let lines := xs.map (fun i => repr i)  -- call Instr’s repr
     Std.Format.joinSep lines Std.Format.line
+
+-- Render a compiled program as AVM-accepted TEAL source text
+def instrToTeal (i : Instr) : String :=
+  match i with
+  | .pragma v => s!"#pragma version {v}"
+  | .arg i    => s!"arg_{i}"
+  | .int n    => s!"int {n}"
+  | .byte bs  => s!"byte 0x{byteArrayToHex bs}"
+  | .add      => "add"
+  | .eq       => "=="
+  | .dup      => "dup"
+  | .swap     => "swap"
+  | .bz l     => s!"bz {l}"
+  | .b l      => s!"b {l}"
+  | .label l  => s!"{l}:"
 
 -- theorem compile_correct (p : Prog s0 s1)
 --   : ∀ t, wellTyped s0 s1 →
@@ -221,7 +244,7 @@ instance : Repr (List Instr) where
 
 -- Condition: compare top-of-stack PIN with 1234 and push 0/1
 def pinCond : TealProg [Ty.uint64] [Ty.uint64, Ty.uint64] :=
-  .seq (.seq (.pushU 1234) .dup) .eqU
+  .seq .dup (.seq (.pushU 1234) .eqU)
   -- start:  [pin]
   -- pushU:  [1234, pin]
   -- eqU:    [pin == 1234 ? 1 : 0]
@@ -237,24 +260,42 @@ def pinGuard : TealProg [Ty.uint64] [Ty.uint64, Ty.uint64] :=
 open Std
 
 def emptyState : MachineState :=
-  { stack := [], scratch := HashMap.emptyWithCapacity }
+  { stack := [], scratch := (Std.HashMap.emptyWithCapacity : Std.HashMap Nat (Ty × Value)) }
 
 def withPin (n : Nat) : MachineState :=
-  { stack := [(Ty.uint64, Value.U n)], scratch := HashMap.emptyWithCapacity }
-
+  { stack := [(Ty.uint64, Value.U n)], scratch := (Std.HashMap.emptyWithCapacity : Std.HashMap Nat (Ty × Value)) }
 
 theorem pinGuard_ok :
   eval pinGuard (withPin 1234)
   =
   .ok { stack := (Ty.uint64, Value.U 1) :: (Ty.uint64, Value.U 1234) :: []
-      , scratch := HashMap.emptyWithCapacity } := by
+      , scratch := (Std.HashMap.emptyWithCapacity : Std.HashMap Nat (Ty × Value)) } := by
   rfl
 
+#eval match eval pinGuard (withPin 1234) with | .ok st => st.stack | .error _ => []
 #eval compileProg pinGuard
 
-theorem pinGuard_bad :
-  ¬ ∃ (n : Nat) (t : MachineState),
-    eval pinGuard (withPin n) = .ok t ∧
-    n ≠ 1234 ∧
-    t.stack.head? = some (Ty.uint64, Value.U 1) := by
-  sorry
+
+-- TODO prove later
+-- theorem pinGuard_bad :
+--   ¬ ∃ (n : Nat) (t : MachineState),
+--     eval pinGuard (withPin n) = .ok t ∧
+--     n ≠ 1234 ∧
+--     t.stack.head? = some (Ty.uint64, Value.U 1) := by
+--   intro h
+--   rcases h with ⟨n, t, hEval, hNe, hHead⟩
+--   -- Evaluate under n ≠ 1234; must take else-branch and push 0
+--   have hElse :
+--       eval pinGuard (withPin n)
+--         = .ok { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
+--                , scratch := (Std.HashMap.emptyWithCapacity : Std.HashMap Nat (Ty × Value)) } := by
+--     -- inline and simplify using n ≠ 1234
+--     simp [eval, pinGuard, pinCond, thenBranch, elseBranch, withPin, hNe]
+--   -- Equate the `.ok` results to identify t
+--   have ht : t =
+--       { stack := (Ty.uint64, Value.U 0) :: (Ty.uint64, Value.U n) :: []
+--       , scratch := (Std.HashMap.emptyWithCapacity : Std.HashMap Nat (Ty × Value)) } := by
+--     cases Eq.trans hEval.symm hElse
+--     rfl
+--   -- Contradiction: top is 0, not 1
+--   simpa [ht] using hHead
