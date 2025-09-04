@@ -221,7 +221,7 @@ instance : Repr (List Instr) where
 
 -- Condition: compare top-of-stack PIN with 1234 and push 0/1
 def pinCond : TealProg [Ty.uint64] [Ty.uint64, Ty.uint64] :=
-  .seq .dup (.seq (.pushU 1234) .eqU)
+  .seq (.seq (.pushU 1234) .dup) .eqU
   -- start:  [pin]
   -- pushU:  [1234, pin]
   -- eqU:    [pin == 1234 ? 1 : 0]
